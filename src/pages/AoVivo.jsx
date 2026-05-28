@@ -52,6 +52,31 @@ function getMachineCategory(m){
   if(m.estado?.startsWith("concluida")||m.estado==="concluida") return "concluida";
   return "andamento";
 }
+// ── Countdown helpers ─────────────────────────────────────────────────────────
+function getModoTimer(m){
+  const est=Number(m?.tempo_estimado_segundos)||0;
+  const acc=Number(m?.timer_accumulated_seconds)||0;
+  if(est>0) return "countdown";
+  if(acc>0) return "legacy";
+  return "legacy";
+}
+function calcRestanteAoVivo(m, elapsed){
+  const est=Number(m?.tempo_estimado_segundos)||0;
+  if(!est) return null;
+  const imprevistos=(m.imprevistos||[]).reduce((s,i)=>s+(Number(i.horas)||0)*3600,0);
+  const total=est+imprevistos;
+  return Math.max(0, total-elapsed);
+}
+function getEstadoCD(m, elapsed){
+  const est=Number(m?.tempo_estimado_segundos)||0;
+  if(!est) return null;
+  const imprevistos=(m.imprevistos||[]).reduce((s,i)=>s+(Number(i.horas)||0)*3600,0);
+  const total=est+imprevistos;
+  const restante=total-elapsed;
+  if(restante<=0) return "atraso";
+  if(restante/total<=0.20) return "aviso";
+  return "ok";
+}
 // STARK ARMOR PALETTE — aplicada apenas no modo dark (d=true)
 const DT = d => ({
   bg:      d?"#0a0408":"#f0f2f8",           // dark: carbono | light: azul frio claro
@@ -177,8 +202,17 @@ function BoardCell({m, D, forceCategory=null}){
   const accent   = cat.accent;
   const rgb      = cat.rgb;
 
-  const timerCol  = run?"#22C55E":"#F59E0B";
-  const timerGlow = run?"rgba(34,197,94,0.6)":"rgba(245,158,11,0.45)";
+  // Countdown awareness
+  const modoTimer  = getModoTimer(m);
+  const isCD       = modoTimer === "countdown";
+  const restanteCD = isCD ? calcRestanteAoVivo(m, elapsed) : null;
+  const estadoCD   = isCD ? getEstadoCD(m, elapsed) : null;
+  const displayTime= isCD && restanteCD !== null ? restanteCD : elapsed;
+
+  const timerCol  = isCD
+    ? (estadoCD==="atraso"?"#EF4444":estadoCD==="aviso"?"#F59E0B":"#22C55E")
+    : run?"#22C55E":"#F59E0B";
+  const timerGlow = `${timerCol}99`;
 
   const recon  = m.recondicao||{};
   const rLabel = recon.prata?"PRATA":recon.bronze?"BRONZE":null;
@@ -262,7 +296,16 @@ function BoardCell({m, D, forceCategory=null}){
           fontSize:"clamp(11px,1.1vw,16px)",fontWeight:900,flexShrink:0,
           color:timerCol,letterSpacing:"0.04em",
           textShadow:`0 0 10px ${timerGlow}`}}>
-          {fmtHMS(elapsed)}
+          {fmtHMS(displayTime)}
+          {isCD&&estadoCD==="atraso"&&<span style={{marginLeft:4,fontSize:"0.7em",animation:"blink 0.8s infinite"}}>⚠</span>}
+          {isCD&&Number(m.tempo_estimado_segundos)>0&&run&&(
+            <div style={{fontFamily:"'Orbitron',monospace",fontSize:"clamp(8px,0.85vw,11px)",fontWeight:700,
+              color:dark?"rgba(255,255,255,0.45)":"rgba(0,0,0,0.35)",letterSpacing:"0.08em",
+              marginTop:2,textAlign:"right",fontVariantNumeric:"tabular-nums",
+              borderTop:dark?"1px solid rgba(255,255,255,0.07)":"1px solid rgba(0,0,0,0.06)",paddingTop:2}}>
+              {"/ "+Math.round(Number(m.tempo_estimado_segundos)/3600)+"h total"}
+            </div>
+          )}
         </div>
       </div>
 
@@ -596,7 +639,16 @@ function RowItem({m, idx, D, forceCategory=null, showTimer=true, showDate=false}
   const cat     = CAT[catKey] || CAT.andamento;
   const accent  = cat.accent;
   const rgb     = cat.rgb;
-  const timerCol= run?"#22C55E":"#F59E0B";
+  // Countdown awareness
+  const modoTimerR  = getModoTimer(m);
+  const isCDR       = modoTimerR === "countdown";
+  const restanteCDR = isCDR ? calcRestanteAoVivo(m, elapsed) : null;
+  const estadoCDR   = isCDR ? getEstadoCD(m, elapsed) : null;
+  const displayTimeR= isCDR && restanteCDR !== null ? restanteCDR : elapsed;
+
+  const timerCol= isCDR
+    ? (estadoCDR==="atraso"?"#EF4444":estadoCDR==="aviso"?"#F59E0B":"#22C55E")
+    : run?"#22C55E":"#F59E0B";
 
   return(
     <div style={{
@@ -658,7 +710,8 @@ function RowItem({m, idx, D, forceCategory=null, showTimer=true, showDate=false}
         <div style={{fontFamily:"'Orbitron',monospace",fontSize:"clamp(12px,1vw,14px)",
           fontWeight:900,color:timerCol,letterSpacing:"0.04em",flexShrink:0,
           textShadow:run?`0 0 10px rgba(34,197,94,0.6)`:`0 0 8px rgba(245,158,11,0.4)`}}>
-          {fmtHMS(elapsed)}
+          {fmtHMS(displayTimeR)}
+          {isCDR&&estadoCDR==="atraso"&&<span style={{marginLeft:4,fontSize:"0.75em",animation:"blink 0.8s infinite"}}>⚠</span>}
         </div>
       ):null}
       {tasks.length>0&&(
@@ -1328,7 +1381,7 @@ export default function AoVivo(){
     {l:"NTS",         v:ntsAnd.length+ntsAF.length,  c:D.pink  },
     {l:"RECON",       v:reconAnd.length+reconAF.length,c:D.purple},
     {l:"ESTA SEMANA", v:conSemana.length,             c:D.green },
-    {l:"TOTAL 2026",  v:totalCon.length,              c:D.sub   },
+    {l:"TOTAL 2026",  v:totalCon.length,              c:"#FF2D78"   },
   ];
 
   return(
